@@ -258,27 +258,3 @@ def register_fits_files(directory, db_path):
             print(f"Unknown category '{file_info['category']}' for file {fits_file}")
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Process FITS files and update database.')
-    parser.add_argument('directory', help='Directory containing FITS files.')
-    parser.add_argument('--db', default='database.db', help='Path to SQLite database file.')
-    args = parser.parse_args()
-
-    register_fits_files(args.directory, args.db)
-
-    db_interface = DatabaseInterface(args.db)
-    # Get unreduced science files
-    unreduced_science = db_interface.get_unreduced_science_files()
-    print("\nUnreduced science files:")
-    print(unreduced_science)
-
-    # For each unreduced science file, get matching calibrations
-    for idx, row in unreduced_science.iterrows():
-        science_id = row['id']
-        calibrations = db_interface.get_calibrations_for_science(science_id)
-        print(f"\nCalibrations for science file ID {science_id}:")
-        print("Flats:")
-        print(calibrations['flats'])
-        print("Darks:")
-        print(calibrations['darks'])
-
