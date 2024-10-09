@@ -66,8 +66,9 @@ class DatabaseInterface:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS reduced_data (
                 id INTEGER PRIMARY KEY,
-                science_id INTEGER UNIQUE,
-                FOREIGN KEY(science_id) REFERENCES science(id)
+                science_unique_key TEXT UNIQUE,
+                reduced_path TEXT UNIQUE,
+                FOREIGN KEY(science_unique_key) REFERENCES science(unique_key)
             )
         ''')
         self.conn.commit()
@@ -127,7 +128,7 @@ class DatabaseInterface:
     def add_science(self, raw_file_id, object_name, date):
         # when applicable, insert the science info into the science table.
         # we construct a unique id for this example: the name of the object and the date of the start of the OB.
-        unique_key = object_name + date
+        unique_key = f"{object_name}__{date}"
         cursor = self.conn.cursor()
         cursor.execute('SELECT id FROM science WHERE unique_key = ?', (unique_key,))
         if cursor.fetchone():
@@ -140,38 +141,51 @@ class DatabaseInterface:
         self.conn.commit()
         return cursor.lastrowid
 
-    def add_reduced_data(self, science_id, reduced_path):
+    def add_reduced_data(self, science_unique_key, reduced_path):
         # to be called after successfully reducing a science
         cursor = self.conn.cursor()
-        cursor.execute('INSERT OR IGNORE INTO reduced_data (science_id, reduced_path) VALUES (?)',
-                       (science_id, reduced_path))
+        cursor.execute('INSERT OR IGNORE INTO reduced_data (science_unique_key, reduced_path) VALUES (?, ?)',
+                       (science_unique_key, str(reduced_path)))
         self.conn.commit()
         return cursor.lastrowid
 
     def get_unreduced_science_files(self):
         # this query allows us to select all science files that do not have a corresponding reduced_data entry.
         query = '''
-            SELECT science.id, science.object_name, science.date
+            SELECT unique_key
             FROM science
-            LEFT JOIN reduced_data ON science.id = reduced_data.science_id
+            LEFT JOIN reduced_data ON science.unique_key = reduced_data.science_unique_key
             WHERE reduced_data.id IS NULL
         '''
         df = pd.read_sql_query(query, self.conn)
         return df
 
-    def get_calibrations_for_science(self, science_id):
-        # get the parameters of the science file at hand.
+    def get_files_for_science(self, science_id):
+        """
+
+        :param science_id:  unique_key, i.e. $objectname__$date
+        :return: raw science file path, flats dataframe, darks dataframe
+        """
+        # get the science file
         cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT rf.path
+            FROM science s
+            JOIN raw_files rf on s.raw_file_id = rf.id
+            WHERE s.unique_key = ?
+        ''', (science_id,))
+        science_raw_path, = cursor.fetchone()
+        # get the parameters of the science file at hand.
         cursor.execute('''
             SELECT rf.binning, rf.read_speed, rf.filter
             FROM science s
             JOIN raw_files rf ON s.raw_file_id = rf.id
-            WHERE s.id = ?
+            WHERE s.unique_key = ?
         ''', (science_id,))
         result = cursor.fetchone()
         if not result:
             print(f"No science file with id {science_id}")
-            return None
+            return
         binning, read_speed, filter_name = result
         # Find matching flats
         flats_query = '''
@@ -192,7 +206,7 @@ class DatabaseInterface:
             AND d.read_speed = ?
         '''
         darks_df = pd.read_sql_query(darks_query, self.conn, params=(binning, read_speed))
-        return {'flats': flats_df, 'darks': darks_df}
+        return science_raw_path, flats_df, darks_df
 
 
 def register_fits_files(directory, db_path):
@@ -210,8 +224,8 @@ def register_fits_files(directory, db_path):
         file_info = {}
         file_info['path'] = fits_file
         # Extract binning
-        cdelt1 = header.get('CDELT1')
-        cdelt2 = header.get('CDELT2')
+        cdelt1 = int(header.get('CDELT1'))
+        cdelt2 = int(header.get('CDELT2'))
         file_info['binning'] = f"{cdelt1}x{cdelt2}"
         file_info['filter'] = header.get('HIERARCH ESO INS FILT1 NAME')
         file_info['category'] = header.get('HIERARCH ESO DPR CATG')

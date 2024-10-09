@@ -12,10 +12,11 @@ def reduce_science_file(science_file_path, flat_files, dark_files, output_reduce
     combined_flat = np.nanmedian(flats, axis=0)
     # normalize combined flat
     combined_flat /= np.nanmedian(combined_flat)  # make it roughly one
+    combined_flat[combined_flat < 1e-8] = 1.0
 
     # reduce science file.
     reduced_science = (fits.getdata(science_file_path) - combined_dark) / combined_flat
     header = fits.getheader(science_file_path)
-    header['reduction steps'] = 'bias sub and flat field'
+    header['REDUC'] = 'bias sub and flat field'
 
-    fits.writeto(output_reduced_file_path, data=reduced_science, header=header)
+    fits.writeto(output_reduced_file_path, data=reduced_science, header=header, overwrite=True)
